@@ -1,7 +1,6 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  creationTimestamp: null
   name: tekton-operator
 rules:
 - apiGroups:
@@ -36,6 +35,7 @@ rules:
   - daemonsets
   - replicasets
   - statefulsets
+  - ingresses
   - deployments/finalizers
   verbs:
   - '*'
@@ -116,6 +116,7 @@ rules:
   - extensions
   resources:
   - deployments
+  - ingresses
   verbs:
   - get
   - list
@@ -162,8 +163,7 @@ rules:
 - apiGroups:
   - dashboard.tekton.dev
   resources:
-  - '*'
-  - addons
+  - 'extensions'
   verbs:
   - '*'
 - apiGroups:
