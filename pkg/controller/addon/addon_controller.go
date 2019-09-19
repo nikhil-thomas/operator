@@ -166,7 +166,8 @@ func (r *ReconcileAddon) reconcileAddon(req reconcile.Request, res *op.Addon) (r
 	}
 
 	//find the valid clusterwide tekton-pipeline installation
-	if piplnRes, err := r.pipelineReady(); err != nil {
+	piplnRes, err := r.pipelineReady()
+	if err != nil {
 		_ = r.updateStatus(res, op.AddonCondition{
 			Code:    op.ErrorStatus,
 			Details: err.Error(),
