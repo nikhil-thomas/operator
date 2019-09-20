@@ -52,7 +52,6 @@ func WaitForClusterCR(t *testing.T, name string, obj runtime.Object) {
 	t.Helper()
 
 	objKey := types.NamespacedName{Name: name}
-	//cr := &op.Config{}
 
 	err := wait.Poll(config.APIRetry, config.APITimeout, func() (bool, error) {
 		err := test.Global.Client.Get(context.TODO(), objKey, obj)
@@ -68,7 +67,6 @@ func WaitForClusterCR(t *testing.T, name string, obj runtime.Object) {
 	})
 
 	AssertNoError(t, err)
-	//return cr
 }
 
 func DeleteClusterCR(t *testing.T, name string) {
@@ -80,6 +78,31 @@ func DeleteClusterCR(t *testing.T, name string) {
 	err := test.Global.Client.Get(context.TODO(), objKey, cr)
 	if err != nil {
 		t.Logf("Failed to find cluster CR: %s : %s\n", name, err)
+	}
+	AssertNoError(t, err)
+
+	err = wait.Poll(config.APIRetry, config.APITimeout, func() (bool, error) {
+		err := test.Global.Client.Delete(context.TODO(), cr)
+		if err != nil {
+			t.Logf("Deletion of CR %s failed %s \n", name, err)
+			return false, err
+		}
+
+		return true, nil
+	})
+
+	AssertNoError(t, err)
+}
+
+func DeleteAddonCR(t *testing.T, name string) {
+	t.Helper()
+
+	// ensure object exists before deletion
+	objKey := types.NamespacedName{Name: name}
+	cr := &op.Addon{}
+	err := test.Global.Client.Get(context.TODO(), objKey, cr)
+	if err != nil {
+		t.Logf("Failed to find addon CR: %s : %s\n", name, err)
 	}
 	AssertNoError(t, err)
 

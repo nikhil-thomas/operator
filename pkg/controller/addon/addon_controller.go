@@ -87,8 +87,6 @@ type ReconcileAddon struct {
 // Reconcile reads that state of the cluster for a Addon object and makes changes based on the state read
 // and what is in the Addon.Spec
 func (r *ReconcileAddon) Reconcile(req reconcile.Request) (reconcile.Result, error) {
-	log := requestLogger(req, "addon reconcile")
-	//reqLogger := log.WithValues("Request.Namespace", req.Namespace, "Request.Name", req.Name)
 	log.Info("Reconciling Addon")
 
 	// Fetch the Addon instance
@@ -169,6 +167,10 @@ func (r *ReconcileAddon) reconcileAddon(req reconcile.Request, res *op.Addon) (r
 
 	//find the valid clusterwide tekton-pipeline installation
 	piplnRes, err := r.pipelineReady()
+	if err == errPipelineNotReady {
+		// wait for pipeline status to change
+		return reconcile.Result{RequeueAfter: 30 * time.Second}, nil
+	}
 	if err != nil {
 		_ = r.updateStatus(res, op.AddonCondition{
 			Code:    op.ErrorStatus,
@@ -176,10 +178,6 @@ func (r *ReconcileAddon) reconcileAddon(req reconcile.Request, res *op.Addon) (r
 			Version: res.Spec.Version,
 		})
 
-		if err == errPipelineNotReady {
-			// wait for pipeline status to change
-			return reconcile.Result{RequeueAfter: 30 * time.Second}, nil
-		}
 		// wait longer as pipeline-install not found
 		// (config.opeator.tekton.dev instance not available yet)
 		return reconcile.Result{RequeueAfter: 2 * time.Minute}, err
@@ -311,10 +309,9 @@ func (r *ReconcileAddon) refreshCR(res *op.Addon) error {
 	return r.client.Get(context.TODO(), objKey, res)
 }
 
-func (r *ReconcileAddon) getPipelineRes() (*op.Config, error) {
+func (r *ReconcileAddon) getClusterConfig() (*op.Config, error) {
 	res := &op.Config{}
 	namespacedName := types.NamespacedName{
-		Namespace: "",
 		Name:      setup.ClusterCRName,
 	}
 	err := r.client.Get(context.TODO(), namespacedName, res)
@@ -322,7 +319,7 @@ func (r *ReconcileAddon) getPipelineRes() (*op.Config, error) {
 }
 
 func (r *ReconcileAddon) pipelineReady() (*op.Config, error) {
-	ppln, err := r.getPipelineRes()
+	ppln, err := r.getClusterConfig()
 	if err != nil {
 		return nil, xerrors.Errorf(errPipelineNotReady.Error(), err)
 	}

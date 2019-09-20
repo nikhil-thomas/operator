@@ -22,10 +22,13 @@ func ValidateAddonInstall(t *testing.T) {
 	ctx := test.NewTestCtx(t)
 	defer ctx.Cleanup()
 
-	installPipeline(t, ctx)
+	checkPipeline(t, ctx)
 
 	t.Run("creating-addon-with-version", addonCRWithVersion)
 	t.Run("creating-addon-without-version", addonCRWithoutVersion)
+
+	deletePipeline(t, ctx)
+
 }
 
 // ValidateAddonDeletion ensures that deleting the addon CR  deletes the already
@@ -34,8 +37,8 @@ func ValidateAddonDeletion(t *testing.T) {
 	ctx := test.NewTestCtx(t)
 	defer ctx.Cleanup()
 
-	installPipeline(t, ctx)
 
+	t.Run("deleting-addon-cr", pipelineCRDeletion)
 	t.Run("deleting-addon-cr", addonCRDeletion)
 }
 
@@ -52,15 +55,48 @@ func installPipeline(t *testing.T, ctx *test.TestCtx) {
 			TargetNamespace: setup.DefaultTargetNs,
 		},
 	}
+
 	cleanupOptions := &test.CleanupOptions{
 		TestContext:   ctx,
 		Timeout:       5 * time.Second,
 		RetryInterval: 1 * time.Second,
 	}
-
 	err := test.Global.Client.Create(context.TODO(), configCR, cleanupOptions)
 	helpers.AssertNoError(t, err)
 	helpers.WaitForClusterCR(t, setup.ClusterCRName, configCR)
+	helpers.ValidatePipelineSetup(t, configCR,
+		setup.PipelineControllerName,
+		setup.PipelineWebhookName)
+
+}
+func checkPipeline(t *testing.T, ctx *test.TestCtx) {
+	configCR := &v1alpha1.Config{
+		TypeMeta: v1.TypeMeta{
+			Kind:       "config",
+			APIVersion: "v1alpha1",
+		},
+		ObjectMeta: v1.ObjectMeta{
+			Name: setup.ClusterCRName,
+		},
+		Spec: v1alpha1.ConfigSpec{
+			TargetNamespace: setup.DefaultTargetNs,
+		},
+	}
+
+	helpers.WaitForClusterCR(t, setup.ClusterCRName, configCR)
+	helpers.ValidatePipelineSetup(t, configCR,
+		setup.PipelineControllerName,
+		setup.PipelineWebhookName)
+
+}
+
+func deletePipeline(t *testing.T, ctx *test.TestCtx) {
+	configCR := &v1alpha1.Config{}
+	helpers.WaitForClusterCR(t, setup.ClusterCRName, configCR)
+	helpers.DeleteClusterCR(t, setup.ClusterCRName)
+	helpers.ValidatePipelineCleanup(t, configCR,
+		setup.PipelineControllerName,
+		setup.PipelineWebhookName)
 }
 
 func addonCRWithVersion(t *testing.T) {
@@ -76,7 +112,7 @@ func addonCRWithVersion(t *testing.T) {
 			Name: "dashboard",
 		},
 		Spec: v1alpha1.AddonSpec{
-			Version: "v0.1.0",
+			Version: "v0.1.1",
 		},
 	}
 
@@ -151,17 +187,15 @@ func addonCRWithoutVersion(t *testing.T) {
 		t.Errorf("Expected version to be %s but got %s", version, addonCR.Spec.Version)
 	}
 
-	// the check on code is disabled because, dashboard v0.1.1 has a dependency on service.knative.dev
-	// eventhough the dashboard components are installed the conditions[0] will not reach 'Installed' in
-	// the current implementation because of the above case.
-	//if code := addonCR.Status.Conditions[0].Code; code != v1alpha1.InstalledStatus {
-	//	t.Errorf("Expected code to be %s but got %s", v1alpha1.InstalledStatus, code)
-	//}
+	if code := addonCR.Status.Conditions[0].Code; code != v1alpha1.InstalledStatus {
+		t.Errorf("Expected code to be %s but got %s", v1alpha1.InstalledStatus, code)
+	}
 }
 
 func addonCRDeletion(t *testing.T) {
 	ctx := test.NewTestCtx(t)
 	defer ctx.Cleanup()
+	installPipeline(t, ctx)
 
 	addonCR := &v1alpha1.Addon{
 		TypeMeta: v1.TypeMeta{
@@ -195,7 +229,39 @@ func addonCRDeletion(t *testing.T) {
 	)
 	helpers.AssertNoError(t, err)
 
-	helpers.WaitForClusterCR(t, "dashboard", addonCR)
+	helpers.DeleteAddonCR(t, "dashboard")
+	helpers.WaitForDeploymentDeletion(t, setup.DefaultTargetNs, "tekton-dashboard")
+
+	deletePipeline(t, ctx)
+}
+
+func pipelineCRDeletion(t *testing.T) {
+	ctx := test.NewTestCtx(t)
+	defer ctx.Cleanup()
+	installPipeline(t, ctx)
+
+	addonCR := &v1alpha1.Addon{
+		TypeMeta: v1.TypeMeta{
+			Kind:       "Addon",
+			APIVersion: "v1alpha1",
+		},
+		ObjectMeta: v1.ObjectMeta{
+			Name: "dashboard",
+		},
+	}
+
+	cleanupOpetions := &test.CleanupOptions{
+		TestContext:   ctx,
+		Timeout:       5 * time.Second,
+		RetryInterval: 1 * time.Second,
+	}
+
+	err := test.Global.Client.Create(
+		context.TODO(),
+		addonCR,
+		cleanupOpetions)
+
+	helpers.AssertNoError(t, err)
 
 	err = e2eutil.WaitForDeployment(
 		t, test.Global.KubeClient, setup.DefaultTargetNs,
@@ -206,11 +272,13 @@ func addonCRDeletion(t *testing.T) {
 	)
 	helpers.AssertNoError(t, err)
 
-	err = test.Global.Client.Delete(
-		context.TODO(),
-		addonCR)
+	cr := &v1alpha1.Config{}
+	helpers.WaitForClusterCR(t, setup.ClusterCRName, cr)
 
-	helpers.AssertNoError(t, err)
+	deletePipeline(t, ctx)
+	helpers.ValidatePipelineCleanup(t, cr,
+		setup.PipelineControllerName,
+		setup.PipelineWebhookName)
 
 	helpers.WaitForDeploymentDeletion(t, setup.DefaultTargetNs, "tekton-dashboard")
 }
